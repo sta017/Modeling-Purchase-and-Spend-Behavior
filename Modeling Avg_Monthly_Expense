@@ -1,0 +1,79 @@
+library(ggplot2)
+library(dplyr)
+library(repr)
+library(caret)
+library(eeptools)    # for DOB to age conversion
+library(ROCR)
+library(pROC)
+
+test_f <- read.csv("AW_test.csv", header = TRUE, stringsAsFactor= TRUE)
+#adventure= read.csv('AdvWorksCusts.csv', header= TRUE, stringsAsFactors= TRUE)
+avgMonthSpend = read.csv('AW_AveMonthSpend.csv', header= TRUE, stringsAsFactors = FALSE)
+bikebuyer= read.csv('AW_BikeBuyer.csv', header= TRUE, stringsAsFactors= FALSE)
+
+
+#Constructing Linear Model.
+adventure = read.csv("AW_bike_Preped.csv", header = TRUE)
+
+
+#DOB to age conversion
+adventure$BirthDate <- as.Date(adventure$BirthDate)
+adventure$BirthDate <- round(age_calc(adventure$BirthDate, unit='years'))
+
+adventure[,'City'] <- NULL
+adventure[,'StateProvinceName']= numeric(nrow(adventure))
+
+
+
+# Adding AveMonthSpend column to the data after scaling it.
+#scaleAvgSpend= preProcess(avgMonthSpend, method=c('center','scale'))
+#avgMonthSpend = predict(scaleAvgSpend, avgMonthSpend)
+#adventure$AveMonthSpend = avgMonthSpend$AveMonthSpend
+
+#### Alternatively, I could add the column and redo the scaling , which gives same result.
+preProcValues <- preProcess(adventure[,num_cols], method= c('center','scale'))
+adventure[,num_cols] <- predict(preProcValues, adventure[, num_cols])
+
+#Splitting the Data based on Gender
+
+partition= createDataPartition(adventure[, 'Gender'], times =1, p = 0.75, list= FALSE)
+
+
+
+training_s = adventure[partition,]
+test_s = adventure[-partition,]
+
+lin_mod = lm(log_spend ~ CountryRegionName + BirthDate + Education + Gender +
+			Occupation + MaritalStatus + HomeOwnerFlag + NumberCarsOwned +
+			NumberChildrenAtHome+ TotalChildren + YearlyIncome, 
+			data = training_s)
+
+summary(lin_mod)$coefficients
+
+#Evaluating the metrics
+print_metrics = function(lin_mod, df, score, label){
+ resids = df[,label] - score 
+ resids2 = resids**2
+ N = length(score)
+ r2 = as.character(round(summary(lin_mod)$r.squared, 4))
+ adj_r2= as.character(round(summary(lin_mod)$adj.r.squared, 4))
+ cat(paste("Mean Squared Error	=",as.character(round(sum(resids2)/N,4)),'\n'))
+ cat(paste("Root Mean Squared Error	=",as.character(round(sqrt(sum(resids2)/N),4)),'\n'))
+ cat(paste("Mean Absolute Error	=",as.character(round(sum(abs(resids2))/N,4)),'\n'))
+ cat(paste("Median Absolute Error	=",as.character(round(median(abs(resids2))/N,4)),'\n'))
+ cat(paste("R^2				=",r2, '\n'))
+ cat(paste("Adjusted R^2		=",adj_r2, '\n'))
+}
+
+score = predict(lin_mod, newdata= test_s)
+print_metrics(lin_mod, test_s, score, label='log_spend')
+
+# The metrics can be obtained only in train data, not for the new data, where 
+# we just predict the outcome.
+
+test_f$score= predict(lin_mod, newdata= test_f)
+test_f$log_score= test_f$score
+test_f$score= exp(test_f$log_score)
+
+
+write.csv(test_f, "Final_analysis.csv")
